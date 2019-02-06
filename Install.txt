@@ -1,3 +1,5 @@
+Ubuntu 18:
+
 sudo apt-get update
 sudo apt install virtualenv
 sudo apt install python3-pip
@@ -19,3 +21,31 @@ source ~/.bashrc
 virtualenv --python=python3 .
 . bin/activate
 pip install pyodbc
+
+
+Red Hat Enterprise Linux 7.6:
+
+https://developers.redhat.com/blog/2018/08/13/install-python3-rhel/
+https://docs.microsoft.com/en-us/sql/connect/python/pyodbc/step-1-configure-development-environment-for-pyodbc-python-development?view=sql-server-2017
+
+sudo yum install @development
+sudo yum -y install rh-python36
+scl enable rh-python36 bash
+
+  sudo su
+  curl https://packages.microsoft.com/config/rhel/7/prod.repo > /etc/yum.repos.d/mssql-release.repo
+  exit
+
+sudo yum remove unixODBC-utf16 unixODBC-utf16-devel #to avoid conflicts
+sudo ACCEPT_EULA=Y yum install msodbcsql17
+sudo ACCEPT_EULA=Y yum install mssql-tools
+
+echo 'export PATH="$PATH:/opt/mssql-tools/bin"' >> ~/.bash_profile
+echo 'export PATH="$PATH:/opt/mssql-tools/bin"' >> ~/.bashrc
+source ~/.bashrc
+sudo yum install unixODBC-devel
+python3 -m venv sql
+cd sql
+. bin/activate
+
+
