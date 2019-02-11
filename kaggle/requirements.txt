@@ -1,0 +1,16 @@
+certifi==2018.11.29
+chardet==3.0.4
+idna==2.8
+kaggle==1.5.2
+numpy==1.16.1
+pandas==0.24.1
+psutil==5.5.0
+pyodbc==4.0.25
+python-dateutil==2.8.0
+python-slugify==2.0.1
+pytz==2018.9
+requests==2.21.0
+six==1.12.0
+tqdm==4.31.0
+Unidecode==1.0.23
+urllib3==1.22

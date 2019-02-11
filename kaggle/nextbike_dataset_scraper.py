@@ -17,17 +17,21 @@ import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
 # Input data files are available in the "../input/" directory.
 # For example, running this (by clicking run or pressing Shift+Enter) will list the files in the input directory
 
+"""
 import os
 print(os.listdir("../input"))
+"""
 
 # Any results you write to the current directory are saved as output.
 
 localfiles = [ "nextbike-live.json"] # "nextbike-live.xml", 
               # .xml seems to be obsolete: size is smaller but taking much longer to load
 sqlitefile = "database.sqlite"
+"""
 for localfile in localfiles:
     !curl -o {localfile} "https://nextbike.net/maps/{localfile}"
 !ls -ltra
+"""
 
 import json
 import psutil
@@ -177,4 +181,4 @@ print (c.execute('''SELECT (SELECT COUNT(guid) FROM countries ) AS Countries,
 
 conn.close()
 
-!ls -ltra
+# !ls -ltra
