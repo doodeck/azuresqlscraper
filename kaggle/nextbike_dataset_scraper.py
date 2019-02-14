@@ -4,7 +4,7 @@ import psutil
 import requests
 
 # interesting how much memory do we need for this kind of processing
-print(psutil.virtual_memory())
+print("before: ", psutil.virtual_memory())
 r = requests.get('https://nextbike.net/maps/nextbike-live.json') # ?place=4728239
 # print (type(r.json())) <class 'dict'>
 # print (r.json())
@@ -13,18 +13,21 @@ nextbike_dict = r.json()
 with open(localfiles[0]) as f:
     nextbike_dict = json.load(f)
 '''
-psutil.virtual_memory()
+print("after: ", psutil.virtual_memory())
 
 
 print(nextbike_dict.keys())
 countrynodescnt = len(nextbike_dict['countries'])
 print(countrynodescnt)
+if countrynodescnt < 100:
+  quit()
+
 # print(nextbike_dict['countries'][0])
 # print(nextbike_dict['countries'][0]["cities"])
 # print(nextbike_dict['countries'][0]["cities"][0]['places'])
 # print(nextbike_dict['countries'][0]['cities'][0]['places'][0]['bike_list'])
 
-sqlitefile = "database.sqlite"
+sqlitefile = "./DB/database.sqlite"
 
 import sqlite3
 conn = sqlite3.connect(sqlitefile) # , timeout=10)
@@ -32,10 +35,12 @@ conn = sqlite3.connect(sqlitefile) # , timeout=10)
 c = conn.cursor()
 
 # TODO Remove before flight
+'''
 c.execute('DROP TABLE IF EXISTS countries')
 c.execute('DROP TABLE IF EXISTS cities')
 c.execute('DROP TABLE IF EXISTS places')
 c.execute('DROP TABLE IF EXISTS bike_list')
+'''
 
 # coutries table
 c.execute('''CREATE TABLE IF NOT EXISTS countries
@@ -180,5 +185,6 @@ conn.close()
 
 # !ls -ltra
 import os
-for file in os.listdir("./"):
-    print (file, ': ', os.stat(file).st_size)
+relpath = "./DB/" # including trailing / please
+for file in os.listdir(relpath):
+    print (file, ': ', os.stat(relpath + file).st_size)
