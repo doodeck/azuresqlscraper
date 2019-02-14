@@ -3,6 +3,8 @@ import json
 import psutil
 import requests
 
+# TODO: protect against double execution (lock file)
+
 # interesting how much memory do we need for this kind of processing
 print("before: ", psutil.virtual_memory())
 r = requests.get('https://nextbike.net/maps/nextbike-live.json') # ?place=4728239
