@@ -6,6 +6,6 @@ logfile="`basename $0`.log"
 echo "### `date`" >> $logfile
 python nextbike_dataset_scraper.py >> $logfile
 
-if (( `date +%H` == 20 && `date +%M` < 10)); then
+if (( `date +%H` == 0 && `date +%M` < 10)); then
   kaggle datasets version --message "cron update `date`" -p ./DB/ >> $logfile
 fi
