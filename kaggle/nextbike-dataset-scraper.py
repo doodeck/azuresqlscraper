@@ -1,3 +1,8 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[ ]:
+
 
 import json
 import psutil
@@ -18,6 +23,11 @@ with open(localfiles[0]) as f:
 print("after: ", psutil.virtual_memory())
 
 
+# ## Grope through the data structure
+
+# In[ ]:
+
+
 print(nextbike_dict.keys())
 countrynodescnt = len(nextbike_dict['countries'])
 print(countrynodescnt)
@@ -28,6 +38,12 @@ if countrynodescnt < 100:
 # print(nextbike_dict['countries'][0]["cities"])
 # print(nextbike_dict['countries'][0]["cities"][0]['places'])
 # print(nextbike_dict['countries'][0]['cities'][0]['places'][0]['bike_list'])
+
+
+# ## Create DB Tables
+
+# In[ ]:
+
 
 sqlitefile = "./DB/database.sqlite"
 
@@ -103,6 +119,12 @@ conn.commit()
 # We can also close the connection if we are done with it.
 # Just be sure any changes have been committed or they will be lost.
 conn.close()
+
+
+# ## Transfer data from JSON/dict to DB
+
+# In[ ]:
+
 
 import time
 
@@ -185,8 +207,13 @@ print (c.execute('''SELECT (SELECT COUNT(guid) FROM countries ) AS Countries,
 
 conn.close()
 
+
+# In[ ]:
+
+
 # !ls -ltra
 import os
 relpath = "./DB/" # including trailing / please
 for file in os.listdir(relpath):
     print (file, ': ', os.stat(relpath + file).st_size)
+
