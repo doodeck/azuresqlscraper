@@ -1,4 +1,4 @@
-server = '*********.database.windows.net'
-database = '*********'
-username = '*********@*********'
-password = '*********'
+server='*********.database.windows.net'
+database='*********'
+username='*********@*********'
+password='*********'
