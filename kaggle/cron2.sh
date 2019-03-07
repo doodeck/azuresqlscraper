@@ -8,8 +8,10 @@ python nextbike-dataset-scraper-prod.py >> $logfile 2>&1
 echo "### End <<< `date`" >> $logfile 2>&1
 # exit
 
+# Careful Azure VM is working in UTC
 if (( `date +%H` == 0 && `date +%M` < 10)); then
   . ../credentials.py
+  export PATH="$PATH:/opt/mssql-tools/bin" # apparently .bashrc and .bash-profile do not take effect from crontab
   for tbl in "countries" "cities" "places" "bike_list"
   do
     # echo $tbl
