@@ -16,10 +16,11 @@ namespace = "NextBscraper"
 
 # interesting how much memory do we need for this kind of processing
 print("before: ", psutil.virtual_memory())
-r = requests.get('https://nextbike.net/maps/nextbike-live.json') # ?place=4728239
+r = requests.get('https://nextbike.net/maps/nextbike-live.json') # ?place=26816 ?city=176
+
 nextbike_dict = r.json()
 """
-with open('nextbike-live_3_2.json') as f:
+with open('nextbike-live_4.json') as f:
     nextbike_dict = json.load(f)
 """
 print("after: ", psutil.virtual_memory())
@@ -33,7 +34,7 @@ print("after: ", psutil.virtual_memory())
 print(nextbike_dict.keys())
 countrynodescnt = len(nextbike_dict['countries'])
 print(countrynodescnt)
-if countrynodescnt < 3:
+if countrynodescnt < 1:
     print ('Suspectedly few nodes found, aborting: ', countrynodescnt)
     quit()
 
@@ -64,7 +65,7 @@ def get_azure_connect_str():
     return 'DRIVER='+driver+';SERVER='+credentials['server']+';PORT=1433;DATABASE='+credentials['database']+';UID='+credentials['username']+';PWD='+ credentials['password']
 
 if useazuresql:
-    print ('Using Azure SQL')
+    print ('Using Azure SQL, schema: ', namespace)
 else:
     print ('Using Sqlite')
 
@@ -221,9 +222,11 @@ def create_azure_tables():
                 cityguid INT NOT NULL FOREIGN KEY REFERENCES ''' + namespace + '''.cities(guid)
                     ON DELETE CASCADE
                     ON UPDATE CASCADE,
+                lat FLOAT(53),
+                lng FLOAT(53),
                 created datetime NOT NULL,
                 disappeared datetime,
-                INDEX places_index (uid, name, bike, spot, cityguid, created, disappeared),
+                INDEX places_index (uid, name, bike, spot, cityguid, lat, lng, created, disappeared),
                 INDEX places_disapp (disappeared) INCLUDE ([uid])
                 -- Recommendation Azure: CREATE NONCLUSTERED INDEX [nci_wi_places_8D60EAA10CDAC3940967E78902A4171B] ON [NextBscraper].[places] ([disappeared]) INCLUDE ([uid]) WITH (ONLINE = ON)
              )''')
@@ -272,8 +275,10 @@ if useazuresql:
 import time
 
 # TODO: apply to all fields where the problem theoretically may appear
-def replace_commas(str): # commas are dusturbing only at CSV export level
-    return str.replace(",", ";")
+# Double quotes are disturbing Kaggle parsing and visualization of CSV files
+# commas are dusturbing only at CSV export level (for obvious reasons)
+def replace_illegals(str):
+    return str.replace(",", ";").replace('"', "'")
 
 def update_azure_tables():
     connectstr = get_azure_connect_str()
@@ -344,7 +349,7 @@ def update_azure_tables():
                 """
                 c.execute('INSERT INTO ' + namespace + '''.cities (uid, name, countryguid, lat, lng, created) SELECT ?,?,?,?,?,CAST ( GETDATE() as DATETIME )
                       WHERE NOT EXISTS (SELECT 1 FROM ''' + namespace + '.cities WHERE uid = ? AND name = ? AND countryguid = ?)',
-                      (city["uid"], city["name"], currcountryguid, city["lat"], city["lng"],#TODO: React on lat/lng changes
+                      (city["uid"], city["name"], currcountryguid, city["lat"], city["lng"], #TODO: React on lat/lng changes
                        city["uid"], city["name"], currcountryguid)) # .encode('utf8')
                 if c.rowcount != 1:
                     print ('INSERT failed: ', city["uid"], city["name"], currcountryguid) # .encode('utf8')
@@ -354,7 +359,10 @@ def update_azure_tables():
             for place in city['places']:
                 spot = None if place['spot'] is None else 1 if place['spot'] == True else 0
                 bike = None if place['bike'] is None else 1 if place['bike'] == True else 0
-                name = replace_commas(place['name'])
+                # print ('lat: ', place['lat'], 'lng: ', place['lng'])
+                # print ('name1: ', place['name'])
+                name = replace_illegals(place['name'])
+                # print ('name2: ', name)
                 # print ("place['spot']: ", place['spot'], type(place['spot']), spot)
                 # print ("place['bike']: ", place['bike'], type(place['bike']), bike)
                 '''
@@ -368,8 +376,8 @@ def update_azure_tables():
                 '''
                 # print ('JSON place: ', place['uid'], name)
                 # ignore names for non spots, they apparently change
-                rows = c.execute('SELECT guid FROM ' + namespace + '.places WHERE uid = ? AND (name = ? OR spot = 0) AND cityguid = ? AND disappeared IS NULL',
-                                         (place["uid"], name, currcityguid)).fetchall()
+                rows = c.execute('SELECT guid FROM ' + namespace + '.places WHERE uid = ? AND (name = ? OR spot = 0) AND cityguid = ? AND lat = ? AND lng = ? AND disappeared IS NULL',
+                                         (place["uid"], name, currcityguid, place["lat"], place["lng"],)).fetchall()
                 if len(rows) > 1:
                     print ('Too many entries for ', place["uid"], name, currcityguid, ' : ', len(rows))
                 elif len(rows) == 1:
@@ -387,13 +395,14 @@ def update_azure_tables():
                     """
 
                     # TODO: detect disappearance immediately, using additional temp table
+
                     c.execute('UPDATE ' + namespace + '''.places SET disappeared = CAST ( GETDATE() as DATETIME )
-                              WHERE disappeared IS NULL AND uid = ? AND (name = ? OR spot = 0) AND cityguid = ?''',
-                              (place["uid"], name, currcityguid))
-                    c.execute('INSERT INTO ' + namespace + '''.places (uid, name, bike, spot, cityguid, created) SELECT ?,?,?,?,?,CAST ( GETDATE() as DATETIME )
-                          WHERE NOT EXISTS (SELECT 1 FROM ''' + namespace + '.places WHERE uid = ? AND (name = ? OR spot = 0) AND cityguid = ? AND disappeared IS NULL)',
-                          (place["uid"], name, bike, spot, currcityguid,
-                           place["uid"], name, currcityguid)) # TODO: verify duplicate using bike & spot as well
+                              WHERE disappeared IS NULL AND uid = ? AND (name = ? OR spot = 0) AND cityguid = ? AND (lat != ? OR lng != ?)''',
+                              (place["uid"], name, currcityguid, place["lat"], place["lng"]))
+                    c.execute('INSERT INTO ' + namespace + '''.places (uid, name, bike, spot, cityguid, lat, lng, created) SELECT ?,?,?,?,?,?,?,CAST ( GETDATE() as DATETIME )
+                          WHERE NOT EXISTS (SELECT 1 FROM ''' + namespace + '.places WHERE uid = ? AND (name = ? OR spot = 0) AND cityguid = ? AND lat = ? AND lng = ? AND disappeared IS NULL)',
+                          (place["uid"], name, bike, spot, currcityguid, place["lat"], place["lng"],
+                           place["uid"], name, currcityguid, place["lat"], place["lng"])) # TODO: verify duplicate using bike & spot as well
                     if c.rowcount != 1:
                         print ('INSERT failed: ', place["uid"], name, bike, spot, currcityguid)
                     else:
@@ -604,12 +613,12 @@ for file in os.listdir(relpath):
 
 # ## Setup and Initialization
 # 
-# # Carefull !!!
+# # Careful !!!
 
 # In[ ]:
 
 
-if False: # To execute change to True but then be carefull!
+if False: # To execute change to True but then be careful!
     connectstr = get_azure_connect_str()
     cnxn = pyodbc.connect(connectstr)
     c = cnxn.cursor()
@@ -629,6 +638,6 @@ if False: # To execute change to True but then be carefull!
     del cnxn
     print ('Tables dropped in schema ', namespace)
 else:
-    print ('To execute change to True but then be carefull with schema: ', namespace)
+    print ('To execute change to True but then be careful with schema: ', namespace)
     
 
