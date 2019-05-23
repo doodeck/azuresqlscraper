@@ -245,7 +245,8 @@ def create_azure_tables():
                 disappeared datetime,
                 INDEX blist_index_all (number, placeguid, appeared, disappeared),
                 INDEX blist_index_plguid (placeguid),
-                INDEX blist_disapp (disappeared)
+                INDEX blist_disapp (disappeared),
+                INDEX blist_disnupl([disappeared], [number], [placeguid])
              )''')
 
     '''
@@ -285,8 +286,8 @@ def update_azure_tables():
     cnxn = pyodbc.connect(connectstr)
     c = cnxn.cursor()
 
-    c.execute('DROP TABLE IF EXISTS ' + namespace + '.tmp_bike_list') # TODO: DELETE FROM instead of DROP TABLE
-    c.execute('CREATE TABLE ' + namespace + '''.tmp_bike_list (
+    c.execute('DROP TABLE IF EXISTS ' + namespace + '.#tmp_bike_list') # TODO: DELETE FROM instead of DROP TABLE
+    c.execute('CREATE TABLE ' + namespace + '''.#tmp_bike_list (
                 number INT PRIMARY KEY, -- assumption: the bikes have globally unique numbers - TODO: to be tested
                 placeguid INT NOT NULL FOREIGN KEY REFERENCES ''' + namespace + '''.places(guid)
                     ON DELETE CASCADE
@@ -294,8 +295,8 @@ def update_azure_tables():
                 INDEX tmp_blist_index (placeguid)
              )''')
 
-    c.execute('DROP TABLE IF EXISTS ' + namespace + '.tmp_places') # TODO: DELETE FROM instead of DROP TABLE
-    c.execute('CREATE TABLE ' + namespace + '''.tmp_places (
+    c.execute('DROP TABLE IF EXISTS ' + namespace + '.#tmp_places') # TODO: DELETE FROM instead of DROP TABLE
+    c.execute('CREATE TABLE ' + namespace + '''.#tmp_places (
                 uid INT PRIMARY KEY, -- assumption: the places have globally unique numbers - TODO: to be tested
                 cityguid INT NOT NULL FOREIGN KEY REFERENCES ''' + namespace + '''.cities(guid)
                     ON DELETE CASCADE
@@ -408,8 +409,8 @@ def update_azure_tables():
                     else:
                         currplaceguid = c.execute('SELECT @@IDENTITY').fetchone()[0]
                         # print ('currplaceguid(2): ', currplaceguid)
-                c.execute('INSERT INTO ' + namespace + '''.tmp_places (uid, cityguid) SELECT ?,?
-                          WHERE NOT EXISTS (SELECT 1 FROM ''' + namespace + '.tmp_places WHERE uid = ? AND cityguid = ?)', # duplicates should never happen
+                c.execute('INSERT INTO ' + namespace + '''.#tmp_places (uid, cityguid) SELECT ?,?
+                          WHERE NOT EXISTS (SELECT 1 FROM ''' + namespace + '.#tmp_places WHERE uid = ? AND cityguid = ?)', # duplicates should never happen
                           (place["uid"], currcityguid,
                            place["uid"], currcityguid)) # TODO: should I care about spot/bike here?
 
@@ -432,19 +433,19 @@ def update_azure_tables():
                                   WHERE NOT EXISTS (SELECT 1 FROM ''' + namespace + '.bike_list WHERE number = ? AND placeguid = ? AND disappeared IS NULL)',
                                   (bike['number'], currplaceguid, # int(time.time()),
                                    bike['number'], currplaceguid))
-                    c.execute('INSERT INTO ' + namespace + '''.tmp_bike_list (number, placeguid) SELECT ?,?
-                              WHERE NOT EXISTS (SELECT 1 FROM ''' + namespace + '.tmp_bike_list WHERE number = ? AND placeguid = ?)', # duplicates should never happen
+                    c.execute('INSERT INTO ' + namespace + '''.#tmp_bike_list (number, placeguid) SELECT ?,?
+                              WHERE NOT EXISTS (SELECT 1 FROM ''' + namespace + '.#tmp_bike_list WHERE number = ? AND placeguid = ?)', # duplicates should never happen
                               (bike['number'], currplaceguid, bike['number'], currplaceguid))
 
     # Places may disappear - in particular when they are bikes which can be left anywhere
     c.execute('UPDATE ' + namespace + '''.places SET disappeared = CAST ( GETDATE() as DATETIME ) WHERE disappeared IS NULL AND uid NOT IN
-                 (SELECT ''' + namespace + '.tmp_places.uid FROM ' + namespace + '.tmp_places JOIN ' + namespace + '''.places
-                  ON (tmp_places.cityguid = tmp_places.cityguid))''')
+                 (SELECT ''' + namespace + '.#tmp_places.uid FROM ' + namespace + '.#tmp_places JOIN ' + namespace + '''.places
+                  ON (#tmp_places.cityguid = places.cityguid))''')
 
     # mark as dispperad bikes which do not apppear in the current JSON anymore - presumable under way
     c.execute('UPDATE ' + namespace + '''.bike_list SET disappeared = CAST ( GETDATE() as DATETIME ) WHERE disappeared IS NULL AND number NOT IN
-                 (SELECT ''' + namespace + '.tmp_bike_list.number FROM ' + namespace + '.tmp_bike_list JOIN ' + namespace + '''.bike_list
-                  ON (tmp_bike_list.placeguid = bike_list.placeguid))''')
+                 (SELECT ''' + namespace + '.#tmp_bike_list.number FROM ' + namespace + '.#tmp_bike_list JOIN ' + namespace + '''.bike_list
+                  ON (#tmp_bike_list.placeguid = bike_list.placeguid))''')
 
     cnxn.commit()
     c.close()
@@ -475,7 +476,7 @@ print (c.execute('''SELECT (
                    (SELECT COUNT (guid) FROM ''' + namespace + '''.cities) AS Cities,
                    (SELECT COUNT (guid) FROM ''' + namespace + '''.places) AS Places,
                    (SELECT COUNT (guid) FROM ''' + namespace + '''.bike_list) AS Bikes''').fetchone())
-                  # (SELECT COUNT (number) FROM ''' + namespace + '''.tmp_bike_list) AS Tmp_Bikes''',
+                  # (SELECT COUNT (number) FROM ''' + namespace + '''.#tmp_bike_list) AS Tmp_Bikes''',
                 
 c.close()
 del c
@@ -624,9 +625,9 @@ if False: # To execute change to True but then be careful!
     c = cnxn.cursor()
     # c.execute('CREATE SCHEMA ' + namespace)
 
-    c.execute('DROP TABLE IF EXISTS ' + namespace + '.tmp_bike_list')
+    c.execute('DROP TABLE IF EXISTS ' + namespace + '.#tmp_bike_list')
     c.execute('DROP TABLE IF EXISTS ' + namespace + '.bike_list')
-    c.execute('DROP TABLE IF EXISTS ' + namespace + '.tmp_places')
+    c.execute('DROP TABLE IF EXISTS ' + namespace + '.#tmp_places')
     c.execute('DROP TABLE IF EXISTS ' + namespace + '.places')
     c.execute('DROP TABLE IF EXISTS ' + namespace + '.cities')
     c.execute('DROP TABLE IF EXISTS ' + namespace + '.countries')
