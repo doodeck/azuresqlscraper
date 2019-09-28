@@ -49,3 +49,27 @@ cd sql
 . bin/activate
 
 
+Oracle Linux
+wget https://download.oracle.com/otn_software/linux/instantclient/193000/instantclient-basic-linux.x64-19.3.0.0.0dbru.zip
+rm instantclient-basic-linux.x64-19.3.0.0.0dbru.zip
+wget https://download.oracle.com/otn_software/linux/instantclient/193000/oracle-instantclient19.3-basic-19.3.0.0.0-1.x86_64.rpm
+wget https://download.oracle.com/otn_software/linux/instantclient/193000/oracle-instantclient19.3-sqlplus-19.3.0.0.0-1.x86_64.rpm
+wget https://download.oracle.com/otn_software/linux/instantclient/193000/oracle-instantclient19.3-tools-19.3.0.0.0-1.x86_64.rpm
+wget https://download.oracle.com/otn_software/linux/instantclient/193000/oracle-instantclient19.3-devel-19.3.0.0.0-1.x86_64.rpm
+wget 'https://download.oracle.com/otn_software/linux/instantclient/193000/oracle-instantclient19.3-odbc-19.3.0.0.0-1.x86_64.rpm'
+sudo yum install oracle-instantclient19.3-*
+Download and unpack wallet files:
+unzip ../wallet_DB............zip
+export TNS_ADMIN=`pwd`
+modify sqlnet.ora to point to the wallet directory
+Check if connection is working:
+sqlplus ADMIN@db201909262051_low
+
+Install and configure pyodbc in python3:
+sudo yum install python3
+sudo pip3 install virtualenv
+virtualenv -p python3 python
+. python/bin/activate
+sudo yum install gcc g++ gcc-c++ python3-devel unixODBC-devel
+pip install pyodbc
+
