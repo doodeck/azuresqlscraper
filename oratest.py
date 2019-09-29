@@ -6,7 +6,7 @@ import credentials
 
 '''
 Connect with Oracle Test User HR
-For Cloud Autonomous DB the table must be installed first:
+For Cloud Autonomous DB the HR schema must be installed first:
 From Web SQL Developer as DBA:
 CREATE USER hr IDENTIFIED BY ***************;
 GRANT CREATE SESSION TO HR;
