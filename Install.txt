@@ -66,11 +66,15 @@ modify sqlnet.ora to point to the wallet directory
 Check if connection is working:
 sqlplus ADMIN@db201909262051_low
 
-Install and configure pyodbc in python3:
+Installing python3
 sudo yum install python3
 sudo pip3 install virtualenv
 virtualenv -p python3 python
 . python/bin/activate
+
+Install and configure pyodbc in python3 - is probably unnecessary, cx_Oracle is enough:
 sudo yum install gcc g++ gcc-c++ python3-devel unixODBC-devel
 pip install pyodbc
 
+Installing cx_Oracle:
+pip install cx_Oracle --upgrade
