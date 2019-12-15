@@ -5,9 +5,17 @@ from hdbcli import dbapi
 import credentials
 
 
-connection = dbapi.connect(credentials.server, credentials.port, credentials.username, credentials.password)
-print (connection.isconnected())
+cnxn = dbapi.connect(credentials.server, credentials.port, credentials.username, credentials.password)
+print (cnxn.isconnected())
 
+c = cnxn.cursor()
+c.execute("SELECT * FROM DUMMY")
+for row in c:
+    print(row)
+c.close()
+del c
+cnxn.close()
+del cnxn
 
 '''
 cursor = connection.cursor()
