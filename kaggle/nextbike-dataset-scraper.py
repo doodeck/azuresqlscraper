@@ -13,10 +13,11 @@ import requests
 # TODO: protect against double execution (lock file)
 
 namespace = "NextBscraper"
+# TODO Use Pluggable / Container Database wehrerever possible instead
 
 # interesting how much memory do we need for this kind of processing
 print("before: ", psutil.virtual_memory())
-r = requests.get('https://nextbike.net/maps/nextbike-live.json') # ?place=26816 ?city=176
+r = requests.get('https://nextbike.net/maps/nextbike-live.json') # ?place=26816 ?city=176 ?place=26816 ?city=176
 
 nextbike_dict = r.json()
 """
@@ -35,7 +36,7 @@ print(nextbike_dict.keys())
 countrynodescnt = len(nextbike_dict['countries'])
 print(countrynodescnt)
 if countrynodescnt < 1:
-    print ('Suspectedly few nodes found, aborting: ', countrynodescnt)
+    print ('Suspiciously few nodes found, aborting: ', countrynodescnt)
     quit()
 
 # print(nextbike_dict['countries'][0])
@@ -44,18 +45,44 @@ if countrynodescnt < 1:
 # print(nextbike_dict['countries'][0]['cities'][0]['places'][0]['bike_list'])
 
 
-# ## Decide if we are going to use Sqlite or Azure
+# ## Decide if we are going to use Sqlite, Azure or Oracle
 
 # In[ ]:
 
 
-# Warning: free tier for 12 months is only 250GB ;-)
-import pyodbc
+from enum import Enum
+class DBType(Enum):
+    SQLITE = 1
+    AZURE = 2 # Azure SQL
+    ORACLE = 3 # Oracle Cloud Autonomous DB
+    HXE = 4 # SAP Hana Express Edition
+
+dbType = DBType.HXE #  DBType.ORACLE # DBType.SQLITE
 
 import os.path
 
-credentialsfilename = "../credentials.py"
-useazuresql = os.path.isfile(credentialsfilename)
+credentialsfilename = "../credentials.py" # similar format for Azure, Oracle and Hana, not used for Sqlite
+# useazuresql = os.path.isfile(credentialsfilename)
+
+if dbType == DBType.AZURE:
+    # Warning: Azure free tier for 12 months is only 250GB ;-)
+    import pyodbc
+    if not os.path.isfile(credentialsfilename):
+        print('Missing credentials file!')
+    print ('Using Azure SQL, schema: ', namespace)
+elif dbType == DBType.ORACLE:
+    import cx_Oracle
+    if (not os.path.isfile(credentialsfilename)):
+        print('Missing credentials file!')
+    print ('Using Oracle SQL') # , schema: ', namespace)
+elif dbType == DBType.HXE:
+    from hdbcli import dbapi
+    if (not os.path.isfile(credentialsfilename)):
+        print('Missing credentials file!')
+    print ('Using Hana XE SQL, schema: ', namespace)
+else:
+    import sqlite3
+    print ('Using Sqlite')
 
 def get_azure_connect_str():
     from runpy import run_path
@@ -64,18 +91,41 @@ def get_azure_connect_str():
     driver = '{ODBC Driver 17 for SQL Server}'
     return 'DRIVER='+driver+';SERVER='+credentials['server']+';PORT=1433;DATABASE='+credentials['database']+';UID='+credentials['username']+';PWD='+ credentials['password']
 
-if useazuresql:
-    print ('Using Azure SQL, schema: ', namespace)
-else:
-    print ('Using Sqlite')
+def get_oracle_connection():
+    from runpy import run_path
+    credentials = run_path(credentialsfilename)
+    # print (credentials.keys())
+    return cx_Oracle.connect(credentials['username'], credentials['password'], credentials['database'])
+
+def get_hxe_connection():
+    from runpy import run_path
+    credentials = run_path(credentialsfilename)
+    # print (credentials.keys())
+    return dbapi.connect(credentials['server'], credentials['port'], credentials['username'], credentials['password'])
+
+# TODO: apply to all fields where the problem theoretically may appear
+# Double quotes are disturbing Kaggle parsing and visualization of CSV files
+# commas are dusturbing only at CSV export level (for obvious reasons)
+def replace_illegals(str):
+    return str.replace(",", ";").replace('"', "'")
+
+def isnotebook():
+    try:
+        shell = get_ipython().__class__.__name__
+        if shell == 'ZMQInteractiveShell':
+            return True   # Jupyter notebook or qtconsole
+        elif shell == 'TerminalInteractiveShell':
+            return False  # Terminal running IPython
+        else:
+            return False  # Other type (?)
+    except NameError:
+        return False      # Probably standard Python interpreter
 
 
 # ## Create Sqlite DB Tables
 
 # In[ ]:
 
-
-import sqlite3
 
 sqlitefile = "./DB/database.sqlite"
 
@@ -156,7 +206,7 @@ def create_sqlite_tables():
     del conn
     return
 
-if not useazuresql:
+if dbType == DBType.SQLITE:
     create_sqlite_tables()
 
 
@@ -264,8 +314,329 @@ def create_azure_tables():
     del cnxn
     return
 
-if useazuresql:
+if dbType == DBType.AZURE:
     create_azure_tables()
+
+
+# ## Create Oracle Autonomous DB Table (if applicable)
+
+# In[ ]:
+
+
+def create_oracle_tables():
+    # TODO: hier not implemented yet
+    cnxn = get_oracle_connection() # connection
+    c = cnxn.cursor() # cursor
+    c.execute("""
+      SELECT SYSDATE FROM DUAL
+    """)
+    cnxn.commit()
+    c.close()
+    del c
+
+    # We can also close the connection if we are done with it.
+    # Just be sure any changes have been committed or they will be lost.
+    cnxn.close()
+    del cnxn
+    return
+
+if dbType == DBType.ORACLE:
+    create_oracle_tables()
+
+
+# ## Create Hana Express Edition DB Table (if applicable)
+
+# In[ ]:
+
+
+def create_hxe_tables():
+    cnxn = get_hxe_connection() # connection
+    c = cnxn.cursor()
+    
+    # TODO Remove before flight
+    c.execute('DROP SCHEMA ' + namespace + ' CASCADE')
+    c.execute('CREATE SCHEMA ' + namespace)
+
+    '''
+    c.execute('DROP TABLE ' + namespace + '._tmp_places')
+    c.execute('DROP TABLE ' + namespace + '._tmp_bike_list')
+    c.execute('DROP TABLE ' + namespace + '.bike_list')
+    c.execute('DROP TABLE ' + namespace + '.places')
+    c.execute('DROP TABLE ' + namespace + '.cities')
+    c.execute('DROP TABLE ' + namespace + '.countries')
+    '''
+    
+    # countries table
+    c.execute("""CREATE COLUMN TABLE """ + namespace + '''.countries (
+                    guid INTEGER PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY, -- PRIMARY KEY IDENTITY (1,1),
+                    country VARCHAR(2) NOT NULL,  -- I don't expect Unicode here, ever
+                    country_name NVARCHAR(40), -- SELECT MAX(LENGTH(country_name)) FROM countries: 22
+                    lat FLOAT(53),
+                    lng FLOAT(53),
+                    created SECONDDATE NOT NULL
+                    -- updated datetime NOT NULL
+                    -- TODO: country list will also change in the future: need disappeared or analog
+                    -- INDEX countries_index (country, country_name)
+                    )''')
+    c.execute("CREATE INDEX  " + namespace + "._idx_countries ON " + namespace + ".countries(country, country_name)")
+
+    # cities table
+    c.execute("""CREATE COLUMN TABLE """ + namespace + '''.cities (
+                guid INTEGER PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY,
+                uid INTEGER NOT NULL,
+                name NVARCHAR(50) NOT NULL, -- SELECT MAX(LENGTH(name)) FROM cities: 36
+                countryguid INTEGER,
+                lat FLOAT(53),
+                lng FLOAT(53),
+                created SECONDDATE NOT NULL,
+                FOREIGN KEY (countryguid) REFERENCES  ''' + namespace + '''.countries(guid)
+                    ON DELETE CASCADE
+                    ON UPDATE CASCADE
+                -- TODO: cities list will also change in the future: need disappeared or analog
+                -- INDEX cities_index (uid, name, countryguid)
+             )''')
+    c.execute("CREATE INDEX  " + namespace + "._idx_cities ON " + namespace + ".cities(uid, name, countryguid)")
+
+    # places table
+    c.execute("""CREATE COLUMN TABLE """ + namespace + '''.places (
+                guid INTEGER PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY,
+                uid INTEGER NOT NULL,
+                name NVARCHAR(100) NOT NULL, -- SELECT MAX(LENGTH(name)) FROM places: 81
+                bike BOOLEAN NOT NULL,
+                spot BOOLEAN NOT NULL, -- spot should always be !bike, but is it?
+                cityguid INTEGER NOT NULL,
+                lat FLOAT(53),
+                lng FLOAT(53),
+                created SECONDDATE NOT NULL,
+                disappeared SECONDDATE,
+                FOREIGN KEY (cityguid) REFERENCES ''' + namespace + '''.cities(guid)
+                    ON DELETE CASCADE
+                    ON UPDATE CASCADE
+                -- INDEX places_index (uid, name, bike, spot, cityguid, lat, lng, created, disappeared),
+                -- INDEX places_disapp (disappeared) INCLUDE ([uid])
+                -- Recommendation Azure: CREATE NONCLUSTERED INDEX [nci_wi_places_8D60EAA10CDAC3940967E78902A4171B] ON [NextBscraper].[places] ([disappeared]) INCLUDE ([uid]) WITH (ONLINE = ON)
+             )''')
+    c.execute("CREATE INDEX  " + namespace + "._idx_places ON " + namespace + ".places(uid, name, bike, spot, cityguid, lat, lng, created, disappeared)")
+    c.execute("CREATE INDEX  " + namespace + "._idx_places_disapp ON " + namespace + ".places(uid, disappeared)")
+
+    # bike_list table
+    c.execute("""CREATE COLUMN TABLE """ + namespace + '''.bike_list (
+                guid INTEGER PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY,
+                number INTEGER,
+                placeguid INTEGER NOT NULL,
+                appeared SECONDDATE NOT NULL,
+                disappeared SECONDDATE,
+                FOREIGN KEY (placeguid) REFERENCES ''' + namespace + '''.places(guid)
+                    ON DELETE CASCADE
+                    ON UPDATE CASCADE
+                -- INDEX blist_index_all (number, placeguid, appeared, disappeared),
+                -- INDEX blist_index_plguid (placeguid),
+                -- INDEX blist_disapp (disappeared),
+                -- INDEX blist_disnupl([disappeared], [number], [placeguid])
+             )''')
+    c.execute("CREATE INDEX  " + namespace + "._idx_blist_all ON " + namespace + ".bike_list(number, placeguid, appeared, disappeared)")
+    c.execute("CREATE INDEX  " + namespace + "._idx_blist_plguid ON " + namespace + ".bike_list(placeguid)")
+    c.execute("CREATE INDEX  " + namespace + "._idx_blist_disapp ON " + namespace + ".bike_list(disappeared)")
+    c.execute("CREATE INDEX  " + namespace + "._idx_blist_disnupl ON " + namespace + ".bike_list(number, placeguid, disappeared)")
+
+    c.execute('CREATE COLUMN TABLE ' + namespace + '''._tmp_bike_list (
+                number INTEGER PRIMARY KEY, -- assumption: the bikes have globally unique numbers - TODO: to be tested
+                placeguid INTEGER NOT NULL,
+                FOREIGN KEY (placeguid) REFERENCES ''' + namespace + '''.places(guid)
+                    ON DELETE CASCADE
+                    ON UPDATE CASCADE
+                -- INDEX tmp_blist_index (placeguid)
+             )''')
+    c.execute("CREATE INDEX  " + namespace + "._idx_tmp_bike_list ON " + namespace + "._tmp_bike_list(placeguid)")
+
+    c.execute('CREATE COLUMN TABLE ' + namespace + '''._tmp_places (
+                uid INTEGER PRIMARY KEY, -- assumption: the places have globally unique numbers - TODO: to be tested
+                cityguid INTEGER NOT NULL,
+                FOREIGN KEY (cityguid) REFERENCES ''' + namespace + '''.cities(guid)
+                    ON DELETE CASCADE
+                    ON UPDATE CASCADE
+                -- INDEX tmp_places_index (cityguid)
+             )''')
+    c.execute("CREATE INDEX  " + namespace + "._idx_tmp_places ON " + namespace + "._tmp_places(cityguid)")
+
+    '''
+    c.execute("SELECT * FROM DUMMY")
+    for row in c:
+        print(row)
+    '''
+    c.close()
+    del c
+    cnxn.close()
+    del cnxn
+    return
+
+if dbType == DBType.HXE and isnotebook():
+    create_hxe_tables()
+
+
+# ## Transfer Data from JSON to SAP HANA DB (if applicable)
+
+# In[ ]:
+
+
+def update_hxe_tables():
+    from timeit import default_timer # as timer
+    cnxn = get_hxe_connection() # connection
+    c = cnxn.cursor()
+
+    # t = time.process_time()
+    start = default_timer()
+
+    c.execute('DELETE FROM ' + namespace + '._tmp_bike_list') # TODO: check if exists
+    c.execute('DELETE FROM ' + namespace + '._tmp_places') # TODO: check if exists
+
+    for country in nextbike_dict['countries']:
+        # print ('JSON country: ', country["country"], country["country_name"])
+        c.execute('SELECT guid FROM ' + namespace + '.countries WHERE country = ? AND country_name = ?',
+                                    (country["country"], country["country_name"])) # .fetchall()
+
+        rows = c.fetchall()
+        if len(rows) > 1:
+            print ('Too many entries for ', country["country"], country["country_name"], ' : ', len(rows))
+        elif len(rows) == 1:
+            currcountryguid = rows[0][0]
+            # print ('already exists currcountryguid(1): ', currcountryguid)
+        else:
+            # print ('about to insert: ', country["country"], country["country_name"])
+            if True != c.execute('INSERT INTO ' + namespace + '.countries (country, country_name, lat, lng, created) VALUES (?,?,?,?,NOW())',
+                  (country["country"], country["country_name"], country["lat"], country["lng"])): #TODO: React on lat/lng changes
+                print ('INSERT failed: ', country["country"], country["country_name"])
+            else:
+                """
+hdbsql SYSTEMDB=> select COLUMN_NAME,COLUMN_ID from table_columns where table_name = 'COUNTRIES' AND schema_name='NEXTBSCRAPER';
+COLUMN_NAME,COLUMN_ID
+"COUNTRY",176994
+"COUNTRY_NAME",176995
+"CREATED",176998
+"GUID",176993
+"LAT",176996
+"LNG",176997
+6 rows selected (overall time 1075.699 msec; server time 452 usec)
+
+hdbsql SYSTEMDB=> select * from sequences where sequence_name like '%176993%';
+SCHEMA_NAME,SEQUENCE_NAME,SEQUENCE_OID,START_NUMBER,MIN_VALUE,MAX_VALUE,INCREMENT_BY,IS_CYCLED,RESET_BY_QUERY,CACHE_SIZE,CREATE_TIME
+"NEXTBSCRAPER","_SYS_SEQUENCE_176993_#0_#",177003,1,1,9223372036854775807,1,"FALSE","select ifnull(MAP( mod((max( to_decimal(\"GUID\")) - (1) ),1),  0, max(\"GUID\") +1,  max(\"GUID\") - mod((max( \"GUID\") - (1)), 1 ) +1 ) , 1) from \"NEXTBSCRAPER\".\"COUNTRIES\"",1,"2019-12-24 08:58:21.727000000"
+1 row selected (overall time 234.386 msec; server time 474 usec)
+
+hdbsql SYSTEMDB=> SELECT NEXTBSCRAPER._SYS_SEQUENCE_176993_#0_#.CURRVAL FROM DUMMY;                                             
+* 326: CURRVAL of given sequence is not yet defined in this session: cannot find currval location by session_id:102104, seq id:177003, seq version:1:  (at pos 7)  SQLSTATE: HY000
+                """
+                c.execute('SELECT MAX(guid) FROM ' + namespace + '.countries') # TODO: sequence will wrap up at some point
+                currcountryguid = c.fetchone()[0]
+                # print ('currcountryguid(2): ', currcountryguid)
+
+        for city in country['cities']:
+            # print ('JSON city: ', city["uid"], city["name"])
+            c.execute('SELECT guid FROM ' + namespace + '.cities WHERE uid = ? AND name = ? AND countryguid = ?',
+                                     (city["uid"], city["name"], currcountryguid)) #.fetchall() # .encode('utf8')
+            rows = c.fetchall()
+            if len(rows) > 1:
+                print ('Too many entries for ', city["uid"], city["name"], currcountryguid, ' : ', len(rows)) # .encode('utf8')
+            elif len(rows) == 1:
+                currcityguid = rows[0][0]
+                # print ('already exists currcityguid(1): ', currcityguid)
+            else:
+                # The reason it's sometimes failing are Unicode characters:
+                # [{"uid":128,"lat":56.9453,"lng":24.1033,"zoom":12,"maps_icon":"","alias":"riga","break":false,"name":"R\u012bga"
+                # https://stackoverflow.com/questions/16565028/pyodbc-remove-unicode-strings
+                if True != c.execute('INSERT INTO ' + namespace + '.cities (uid, name, countryguid, lat, lng, created) VALUES (?,?,?,?,?,NOW())',
+                      (city["uid"], city["name"], currcountryguid, city["lat"], city["lng"])): #TODO: React on lat/lng changes
+                    print ('INSERT failed: ', city["uid"], city["name"], currcountryguid) # .encode('utf8')
+                else:
+                    c.execute('SELECT MAX(guid) FROM ' + namespace + '.cities') # TODO: sequence will wrap up at some point
+                    currcityguid = c.fetchone()[0]
+                    # print ('currcityguid(2): ', currcityguid)
+
+            for place in city['places']:
+                spot = place['spot'] # None if place['spot'] is None else 1 if place['spot'] == True else 0
+                bike = place['bike'] # None if place['bike'] is None else 1 if place['bike'] == True else 0
+                # print ('lat: ', place['lat'], 'lng: ', place['lng'])
+                # print ('name1: ', place['name'])
+                name = replace_illegals(place['name'])
+                # print ('name2: ', name)
+                # print ("place['spot']: ", place['spot'], type(place['spot']), spot)
+                # print ("place['bike']: ", place['bike'], type(place['bike']), bike)
+                # print ('JSON place: ', place['uid'], name)
+                # ignore names for non spots, they apparently change
+                c.execute('SELECT guid FROM ' + namespace + '.places WHERE uid = ? AND (name = ? OR spot = FALSE) AND cityguid = ? AND lat = ? AND lng = ? AND disappeared IS NULL',
+                                         (place["uid"], name, currcityguid, place["lat"], place["lng"],))
+                rows = c.fetchall()
+                if len(rows) > 1:
+                    print ('Too many entries for ', place["uid"], name, currcityguid, ' : ', len(rows))
+                elif len(rows) == 1:
+                    currplaceguid = rows[0][0]
+                    # print ('currplaceguid(1): ', currplaceguid)
+                else:
+                    c.execute('UPDATE ' + namespace + '''.places SET disappeared = NOW()
+                              WHERE disappeared IS NULL AND uid = ? AND (name = ? OR spot = FALSE) AND cityguid = ? AND (lat != ? OR lng != ?)''',
+                              (place["uid"], name, currcityguid, place["lat"], place["lng"]))
+                    if True != c.execute('INSERT INTO ' + namespace + '.places (uid, name, bike, spot, cityguid, lat, lng, created) VALUES (?,?,?,?,?,?,?,NOW ())',
+                          (place["uid"], name, bike, spot, currcityguid, place["lat"], place["lng"])): # TODO: verify duplicate using bike & spot as well
+                        print ('INSERT failed: ', place["uid"], name, bike, spot, currcityguid)
+                    else:
+                        c.execute('SELECT MAX(guid) FROM ' + namespace + '.places') # TODO: sequence will wrap up at some point
+                        currplaceguid = c.fetchone()[0]
+
+                        # print ('currplaceguid(2): ', currplaceguid)
+                c.execute('UPSERT ' + namespace + '._tmp_places (uid, cityguid) VALUES (?,?) WHERE uid=? AND cityguid=?', # duplicates should never happen
+                          (place["uid"], currcityguid, place["uid"], currcityguid,)) # TODO: should I care about spot/bike here?
+
+                for bike in place['bike_list']:
+                    # print ('JSON bike: ', bike['number'])
+                    # bikeuid = int(str(place['uid']) + str(bike['number'])) # Integers in Python 3 are of unlimited size.
+                    c.execute('SELECT guid FROM ' + namespace + '.bike_list WHERE number = ? AND placeguid = ? AND disappeared IS NULL',
+                                             (bike['number'], currplaceguid))
+                    rows = c.fetchall()
+                    if len(rows) > 1:
+                        print ('Too many entries for ', bike['number'], currplaceguid, ' : ', len(rows))
+                    elif len(rows) == 1:
+                        currentnumber = rows[0][0] # value not used other than for testing
+                        # print ('currentnumber: ', currentnumber)
+                    else:
+                        # disappear the bike from the old location, unless already gone:
+                        c.execute('UPDATE ' + namespace + '''.bike_list SET disappeared = NOW()
+                                  WHERE disappeared IS NULL AND number = ? AND placeguid != ?''', (bike['number'], currplaceguid))
+                        # Insert the bike into the new location:
+                        c.execute('INSERT INTO ' + namespace + '.bike_list (number, placeguid, appeared, disappeared) VALUES (?,?,NOW(), NULL)',
+                                  (bike['number'], currplaceguid))
+                    c.execute('UPSERT ' + namespace + '._tmp_bike_list (number, placeguid) VALUES (?,?) WHERE number=? AND placeguid=?',
+                              (bike['number'], currplaceguid, bike['number'], currplaceguid,))
+
+    # Places may disappear - in particular when they are bikes which can be left anywhere
+    c.execute('UPDATE ' + namespace + '''.places SET disappeared = NOW() WHERE disappeared IS NULL AND uid NOT IN
+                 (SELECT ''' + namespace + '._tmp_places.uid FROM ' + namespace + '._tmp_places JOIN ' + namespace + '''.places
+                  ON (_tmp_places.cityguid = places.cityguid))''')
+
+    # mark as dispperad bikes which do not apppear in the current JSON anymore - presumable under way
+    c.execute('UPDATE ' + namespace + '''.bike_list SET disappeared = NOW() WHERE disappeared IS NULL AND number NOT IN
+                 (SELECT ''' + namespace + '._tmp_bike_list.number FROM ' + namespace + '._tmp_bike_list JOIN ' + namespace + '''.bike_list
+                  ON (_tmp_bike_list.placeguid = bike_list.placeguid))''')
+
+    c.close()
+    del c
+    cnxn.close()
+    del cnxn
+    print ("Time elapsed: ", default_timer() - start)
+    return
+
+if dbType == DBType.HXE:
+    update_hxe_tables()
+
+
+# In[ ]:
+
+
+"""
+print (nextbike_dict['countries'][0]['cities'][0]['places'][0]['bike_list'])
+del nextbike_dict['countries'][0]['cities'][0]['places'][0]['bike_list'][1]
+print (nextbike_dict['countries'][0]['cities'][0]['places'][0]['bike_list'])
+"""
+print (isnotebook())
 
 
 # ## Transfer Data from JSON to Azure DB (if applicable)
@@ -274,12 +645,6 @@ if useazuresql:
 
 
 import time
-
-# TODO: apply to all fields where the problem theoretically may appear
-# Double quotes are disturbing Kaggle parsing and visualization of CSV files
-# commas are dusturbing only at CSV export level (for obvious reasons)
-def replace_illegals(str):
-    return str.replace(",", ";").replace('"', "'")
 
 def update_azure_tables():
     connectstr = get_azure_connect_str()
@@ -458,7 +823,7 @@ def update_azure_tables():
 SELECT * FROM NextBscraper.places ORDER BY created DESC;
 SELECT COUNT(*) FROM NextBscraper.places;
 '''
-if useazuresql:
+if dbType == DBType.AZURE:
     update_azure_tables()
 
 
@@ -467,45 +832,39 @@ if useazuresql:
 # In[ ]:
 
 
-connectstr = get_azure_connect_str()
-cnxn = pyodbc.connect(connectstr)
-c = cnxn.cursor()
+if dbType == DBType.AZURE:
+    connectstr = get_azure_connect_str()
+    cnxn = pyodbc.connect(connectstr)
+    c = cnxn.cursor()
 
-print (c.execute('''SELECT (
-                    SELECT COUNT(guid) FROM ''' + namespace + '''.countries ) AS Countries, 
-                   (SELECT COUNT (guid) FROM ''' + namespace + '''.cities) AS Cities,
-                   (SELECT COUNT (guid) FROM ''' + namespace + '''.places) AS Places,
-                   (SELECT COUNT (guid) FROM ''' + namespace + '''.bike_list) AS Bikes''').fetchone())
-                  # (SELECT COUNT (number) FROM ''' + namespace + '''.#tmp_bike_list) AS Tmp_Bikes''',
-                
-c.close()
-del c
-cnxn.close()     #<--- Close the connection
-del cnxn
+    print (c.execute('''SELECT (
+                        SELECT COUNT(guid) FROM ''' + namespace + '''.countries ) AS Countries, 
+                       (SELECT COUNT (guid) FROM ''' + namespace + '''.cities) AS Cities,
+                       (SELECT COUNT (guid) FROM ''' + namespace + '''.places) AS Places,
+                       (SELECT COUNT (guid) FROM ''' + namespace + '''.bike_list) AS Bikes''').fetchone())
+                      # (SELECT COUNT (number) FROM ''' + namespace + '''.#tmp_bike_list) AS Tmp_Bikes''',
 
-"""
-Helpful in researching the problem:
+    c.close()
+    del c
+    cnxn.close()     #<--- Close the connection
+    del cnxn
 
-SELECT COUNT(*) FROM NextBscraper.places;
-SELECT * FROM NextBscraper.places WHERE uid = 40600;
-SELECT * FROM NextBscraper.places WHERE uid = 40600;
+if dbType == DBType.HXE:
+    cnxn = get_hxe_connection() # connection
+    c = cnxn.cursor()
 
-SELECT COUNT(*) FROM NextBscraper.cities;
-SELECT * FROM NextBscraper.cities WHERE guid IN (52,247,279);
-SELECT * FROM NextBscraper.cities WHERE uid = 128 AND name = 'Riga';
-SELECT name, LEN(name) FROM NextBscraper.cities;
-SELECT * FROM NextBscraper.cities WHERE uid = 128 AND name = 'Riga' AND countryguid = 6;
+    c.execute('''SELECT * FROM (
+                        SELECT COUNT(guid) AS Countries FROM ''' + namespace + '''.countries), 
+                       (SELECT COUNT (guid) AS Cities FROM ''' + namespace + '''.cities),
+                       (SELECT COUNT (guid) AS Places FROM ''' + namespace + '''.places),
+                       (SELECT COUNT (guid) AS Bikes FROM ''' + namespace + '''.bike_list)''')
+    print (c.fetchone())
+                      # (SELECT COUNT (number) FROM ''' + namespace + '''.#tmp_bike_list) AS Tmp_Bikes''',
 
-SELECT COUNT(*) FROM NextBscraper.countries;
-SELECT COUNT(*) FROM NextBscraper.places;
-SELECT * FROM NextBscraper.places WHERE uid = 40600;
-SELECT * FROM NextBscraper.places WHERE uid = 40600;
-
-SELECT COUNT(*) FROM NextBscraper.countries;
-SELECT * FROM NextBscraper.countries;
-SELECT * FROM NextBscraper.countries WHERE guid = 5 ;
-
-"""
+    c.close()
+    del c
+    cnxn.close()     #<--- Close the connection
+    del cnxn
 
 
 # ## Transfer data from JSON/dict to Sqlite DB (if applicable)
@@ -598,7 +957,7 @@ def update_sqlite_tables():
     del conn
     return
 
-if not useazuresql:
+if dbType == DBType.SQLITE:
     update_sqlite_tables()
 
 
@@ -619,7 +978,7 @@ for file in os.listdir(relpath):
 # In[ ]:
 
 
-if False: # To execute change to True but then be careful!
+if False and dbType == DBType.AZURE: # To execute change to True but then be careful!
     connectstr = get_azure_connect_str()
     cnxn = pyodbc.connect(connectstr)
     c = cnxn.cursor()
